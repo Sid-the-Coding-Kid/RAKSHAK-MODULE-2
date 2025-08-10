@@ -1,0 +1,193 @@
+#include "thingProperties.h"
+#include <WiFi.h>
+#include <esp_wifi.h>
+#include <Wire.h>
+#include <DHT.h>
+#include <LiquidCrystal_I2C.h>
+#include <HTTPClient.h>
+#include <base64.h>  // For Twilio
+
+
+#define DHTPIN 4
+#define DHTTYPE DHT22
+#define MQ2_PIN 34
+#define MQ135_PIN 35
+#define BUZZER_PIN 14
+
+DHT dht(DHTPIN, DHTTYPE);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// Twilio credentials
+const char* accountSID = "USERNAME FOR TWILIO";
+const char* authToken = "AUTHENTICATION TOKEN FOR TWILO";
+const char* fromNumber = "PHONE NUMBER YOU CREATED";
+const char* twimlURL = "URL";
+
+const char* alertNumbers[] = {
+  "YOUR PHONE NUMBER",
+};
+const int numberOfRecipients = sizeof(alertNumbers) / sizeof(alertNumbers[0]);
+
+// State tracking
+bool alertActive = false;
+bool callsMade = false;
+bool buzzerState = false;
+
+unsigned long startupTime = 0;
+const unsigned long startupDelay = 15000;  // 15 seconds
+const int smokeThreshold = 500;  // Trigger buzzer above 500
+
+typedef struct struct_message {
+  float temperatureF;
+  float humidity;
+  int smoke;
+  int ammonia;
+} struct_message;
+
+struct_message dataToSend;
+
+void setBuzzer(bool on) {
+  digitalWrite(BUZZER_PIN, on ? LOW : HIGH);  // Active LOW
+  buzzerState = on;
+  Serial.print("Buzzer turned ");
+  Serial.println(on ? "ON" : "OFF");
+}
+
+void makePhoneCall(const char* toNumber) {
+  String credentials = String(accountSID) + ":" + String(authToken);
+  String base64Credentials = base64::encode(credentials);
+  String url = "https://api.twilio.com/2010-04-01/Accounts/" + String(accountSID) + "/Calls.json";
+  String postData = "To=" + String(toNumber) + "&From=" + String(fromNumber) + "&Url=" + String(twimlURL);
+
+  HTTPClient http;
+  http.begin(url);
+  http.addHeader("Authorization", "Basic " + base64Credentials);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  int httpCode = http.POST(postData);
+
+  if (httpCode > 0) {
+    Serial.println("✅ Call triggered to " + String(toNumber));
+    Serial.println(http.getString());
+  } else {
+    Serial.println("❌ Call failed to " + String(toNumber) + ", HTTP code: " + String(httpCode));
+  }
+
+  http.end();
+}
+
+void setup() {
+  Serial.begin(9600);
+  delay(1500);
+
+  
+  
+  initProperties();
+  ArduinoCloud.begin(ArduinoIoTPreferredConnection);
+  setDebugMessageLevel(2);
+  ArduinoCloud.printDebugInfo();
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);  // Buzzer OFF
+  buzzerState = false;
+  servo = false;
+
+  dht.begin();
+  pinMode(DHTPIN, INPUT_PULLUP);
+  analogReadResolution(10);
+
+  lcd.init();
+  lcd.backlight();
+
+  startupTime = millis();  // Start delay timer
+}
+
+void loop() {
+  ArduinoCloud.update();
+
+  float tempC = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  if (isnan(tempC) || isnan(humidity)) {
+    Serial.println("DHT22 failed ❌");
+    dataToSend.temperatureF = 0;
+    dataToSend.humidity = 0;
+  } else {
+    dataToSend.temperatureF = tempC * 9.0 / 5.0 + 32.0;
+    dataToSend.humidity = humidity;
+  }
+
+  dataToSend.smoke = analogRead(MQ2_PIN);
+  dataToSend.ammonia = analogRead(MQ135_PIN);
+
+  // Update IoT variables
+  humidity_Module1 = dataToSend.humidity;
+  temperature_Module1 = dataToSend.temperatureF;
+  mQ2_Module1 = dataToSend.smoke;
+  mQ135_Module1 = dataToSend.ammonia;
+
+  Serial.printf("Smoke: %d (Threshold: %d)\n", dataToSend.smoke, smokeThreshold);
+
+  if (millis() - startupTime > startupDelay) {
+    if (dataToSend.smoke > smokeThreshold && !buzzerState) {
+      setBuzzer(true);
+      digitalWrite(BUZZER_PIN, HIGH);  // Buzzer ON
+      alertMessage = "⚠️ Warning: Unsafe smoke levels!";
+      Serial.println("🚨 Smoke alert triggered");
+      servo=true;
+
+      if (!callsMade) {
+        for (int i = 0; i < numberOfRecipients; i++) {
+          makePhoneCall(alertNumbers[i]);
+          delay(1000);
+        }
+        callsMade = true;
+      }
+    } else if (dataToSend.smoke <= smokeThreshold && buzzerState) {
+      setBuzzer(false);
+      digitalWrite(BUZZER_PIN, LOW);  // Buzzer OFF
+      alertMessage = "";
+      callsMade = false;
+      Serial.println("✅ Air is clean again, alert cleared");
+    }
+  }
+
+  // LCD Display
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("T:");
+  lcd.print(dataToSend.temperatureF, 1);
+  lcd.print("F H:");
+  lcd.print(dataToSend.humidity, 0);
+  lcd.print("%");
+
+  lcd.setCursor(0, 1);
+  lcd.print("S:");
+  lcd.print(dataToSend.smoke);
+//  lcd.print(" CO2:");
+//  lcd.print(dataToSend.ammonia);
+
+  Serial.printf("Temp: %.1f°F | Hum: %.0f%%\n", dataToSend.temperatureF, dataToSend.humidity);
+  Serial.printf("Smoke: %d | Ammonia: %d\n", dataToSend.smoke, dataToSend.ammonia);
+
+  delay(1000);
+}
+
+void onAlertMessageChange() {
+  // Placeholder for IoT variable change
+}
+
+/*
+  Since ServoMotor is READ_WRITE variable, onServoMotorChange() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onServoMotorChange()  {
+ // Add your code here to act upon ServoMotor change
+}
+/*
+  Since Servo is READ_WRITE variable, onServoChange() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onServoChange()  {
+  // Add your code here to act upon Servo change
+}
