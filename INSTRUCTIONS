@@ -1,0 +1,61 @@
+========INSTRUCTIONS========
+
+Create an arduino iot cloud account: https://cloud.arduino.cc
+
+Download cloud agent: https://cloud.arduino.cc/download-agent/
+
+Wire your module based on image
+
+Create a thing and add a device
+  It is a ESP32 Wroover Module
+  Add wifi credentials and save your secret key
+
+Add all the cloud variables from the image
+  All the sensors should be read only while everything else is read/write
+
+Connect ESP to your device
+
+Paste code into the code section and go to thing_properties.h and type your internet details and secret key 
+
+Create a dashboard and add 2 gauges (temp and smoke) and 1 percent widget (humidity) and set them to their respective variable
+
+If you would like to track and store all the data you have collected create a graph and set to the variables
+
+Create twillo phone number (free; you get free credits to use instead of real money)
+
+  Go to https://www.twilio.com and create an account.
+
+  If you are on a trial account:
+
+    You must verify every phone number you send calls or texts to.
+
+    This is a legal restriction; only paid accounts can call any number without verifying.
+
+In your Twilio Console:
+
+  Copy down:
+
+    Account SID (looks like ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)
+
+    Auth Token (keep this private)
+
+Go to Phone Numbers → Manage → Buy a Number.
+
+  Get a Toll-Free or Local number that supports voice calls.
+
+  If you use a toll-free number, Twilio requires toll-free verification before it can send messages/calls reliably — you’ll fill out their form.
+
+In Twilio Console:
+
+Go to Functions → TwiML Bins → Create New TwiML Bin.
+
+Paste something like this: 
+
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">Warning! The habitat monitoring system has detected an alert. Please check your system immediately.</Say>
+</Response>
+
+Save it and copy the TwiML Bin URL (it will look like https://handler.twilio.com/twiml/EHxxxxxxxxxxxxxxxxxxxxxx).
+
+Upload code
